@@ -26,6 +26,44 @@
 (require 'org-duration)
 (require 'org-inlinetask)
 
+(ert-deftest test-org-colview/compile-format ()
+  "Test `test-org-columns-compile-format' specifications."
+  ;; With minimum data, one element
+  (should
+   (equal `(("ITEM" "ITEM" nil nil nil))
+          (org-columns-compile-format
+           "%ITEM")))
+  ;; With minimum data, two element
+  (should
+   (equal `(("ITEM" "ITEM" nil nil nil) ("ITEM" "ITEM" nil nil nil))
+          (org-columns-compile-format
+           "%ITEM %ITEM")))
+  ;; Read width
+  (should
+   (equal `(("ITEM" "ITEM" 10 nil nil))
+          (org-columns-compile-format
+           "%10ITEM")))
+  ;; Upcase property name
+  (should
+   (equal `(("ITEM" "item" nil nil nil))
+          (org-columns-compile-format
+           "%item")))
+  ;; Read title
+  (should
+   (equal `(("ITEM" "some title" nil nil nil))
+          (org-columns-compile-format
+           "%ITEM(some title)")))
+  ;; Read operator
+  (should
+   (equal `(("ITEM" "ITEM" nil "+" nil))
+          (org-columns-compile-format
+           "%ITEM{+}")))
+  ;; Read operator printf
+  (should
+   (equal `(("ITEM" "ITEM" nil "+" "%.1f"))
+          (org-columns-compile-format
+           "%ITEM{+;%.1f}"))))
+
 (ert-deftest test-org-colview/get-format ()
   "Test `org-columns-get-format' specifications."
   ;; Without any clue, use `org-columns-default-format'.
