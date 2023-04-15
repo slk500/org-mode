@@ -26,6 +26,34 @@
 (require 'org-duration)
 (require 'org-inlinetask)
 
+(ert-deftest test-org-colview/uncompile-format ()
+  "Test `test-org-columns-uncompile-format' specifications."
+  ;; With minimum data, one element
+  (should
+   (equal "%ITEM"
+          (org-columns-uncompile-format '(("ITEM" "ITEM" nil nil nil)))))
+  ;; With minimum data, two element
+  (should
+   (equal "%ITEM %TODO"
+          (org-columns-uncompile-format
+           `(("ITEM" "ITEM" nil nil nil) ("TODO" "TODO" nil nil nil)))))
+  ;; Read width
+  (should
+   (equal "%10ITEM"
+          (org-columns-uncompile-format `(("ITEM" "ITEM" 10 nil nil)))))
+  ;; Read title
+  (should
+   (equal "%ITEM(some title)"
+          (org-columns-uncompile-format `(("ITEM" "some title" nil nil nil)))))
+  ;; Read operator
+  (should
+   (equal "%ITEM{+}"
+          (org-columns-uncompile-format `(("ITEM" "ITEM" nil "+" nil)))))
+  ;; Read operator printf
+  (should
+   (equal "%ITEM{+;%.1f}"
+          (org-columns-uncompile-format  `(("ITEM" "ITEM" nil "+" "%.1f"))))))
+
 (ert-deftest test-org-colview/compile-format ()
   "Test `test-org-columns-compile-format' specifications."
   ;; With minimum data, one element
@@ -35,9 +63,9 @@
            "%ITEM")))
   ;; With minimum data, two element
   (should
-   (equal `(("ITEM" "ITEM" nil nil nil) ("ITEM" "ITEM" nil nil nil))
+   (equal `(("ITEM" "ITEM" nil nil nil) ("TODO" "TODO" nil nil nil))
           (org-columns-compile-format
-           "%ITEM %ITEM")))
+           "%ITEM %TODO")))
   ;; Read width
   (should
    (equal `(("ITEM" "ITEM" 10 nil nil))
@@ -1582,3 +1610,8 @@ SCHEDULED: <2020-05-11 Mon> DEADLINE: <2020-05-14 Thu>
 
 (provide 'test-org-colview)
 ;;; test-org-colview.el ends here
+
+;; Local Variables:
+;; nameless-current-name: "test-org-colview"
+;; nameless-separator: "/" 
+;; End:
