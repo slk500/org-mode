@@ -26,6 +26,18 @@
 (require 'org-duration)
 (require 'org-inlinetask)
 
+(ert-deftest test-org-colview/org-columns--summerize ()
+  ;; return function name
+  (should
+   (equal "org-columns--summary-sum"
+          (org-columns--summarize "+"))))
+
+(ert-deftest test-org-colview/org-columns--collect ()
+  ;; return nil
+  (should
+   (equal nil
+          (org-columns--collect "+"))))
+
 (ert-deftest test-org-colview/uncompile-format ()
   "Test `test-org-columns-uncompile-format' specifications."
   ;; With minimum data, one element
