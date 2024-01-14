@@ -1105,6 +1105,11 @@ additional structure.  They also provide a way to create lists of
 checkboxes (see [[*Checkboxes]]).  Org supports editing such lists, and
 every exporter (see [[*Exporting]]) can parse and format them.
 
+*** Plain Lists types
+:PROPERTIES:
+:DESCRIPTION: Ordered lists, unordered lists, and description lists.
+:END:
+
 Org knows ordered lists, unordered lists, and description lists.
 
 #+attr_texinfo: :indic @bullet
@@ -1308,6 +1313,259 @@ to disable them individually.
   Sort the plain list.  Prompt for the sorting method: numerically,
   alphabetically, by time, or by custom function.
 
+*** Checkboxes
+:PROPERTIES:
+:DESCRIPTION: Add checkbox to plain list item.
+:END:
+#+cindex: checkboxes
+
+#+vindex: org-list-automatic-rules
+Every item in a plain list[fn:17] (see [[*Plain Lists]]) can be made into
+a checkbox by starting it with the string =[ ]=.  This feature is
+similar to TODO items (see [[*TODO Items]]), but is more lightweight.
+Checkboxes are not included into the global TODO list, so they are
+often great to split a task into a number of simple steps.  Or you can
+use them in a shopping list.
+
+Here is an example of a checkbox list:
+
+#+begin_example
+  - [-] call people
+    - [ ] Peter
+    - [X] Sarah
+    - [ ] Sam
+  - [X] order food
+  - [ ] think about what music to play
+  - [X] talk to the neighbors
+#+end_example
+
+**** Checkboxes states
+:PROPERTIES:
+:DESCRIPTION: Not checked, partially checked and checked.
+:END:
+
+A checkbox can be in one of the three states:
+1. not checked =[ ]=
+2. partially checked =[-]=
+3. checked =[X]=
+
+Checkboxes work hierarchically, so if a checkbox item has children
+that are checkboxes, toggling one of the children checkboxes makes the
+parent checkbox reflect if none, some, or all of the children are
+checked.
+
+If all child checkboxes are not checked, the parent checkbox is also not checked.
+#+begin_example
+- [ ] call people
+  - [ ] Peter
+  - [ ] Sarah
+#+end_example
+
+If some but not all child checkboxes are checked, the parent checkbox is partially checked.
+#+begin_example
+- [-] call people
+  - [X] Peter
+  - [ ] Sarah
+#+end_example
+
+If all child checkboxes are checked, the parent checkbox is also checked.
+#+begin_example
+- [X] call people
+  - [X] Peter
+  - [X] Sarah
+#+end_example
+
+#+cindex: blocking, of checkboxes
+#+cindex: checkbox blocking
+#+cindex: @samp{ORDERED}, property
+If the current outline node has an =ORDERED= property, checkboxes must
+be checked off in sequence, and an error is thrown if you try to check
+off a box while there are unchecked boxes above it.
+
+**** Checkboxes commands
+- {{{kbd(C-c C-c)}}} (~org-toggle-checkbox~) ::
+
+  #+kindex: C-c C-c
+  #+findex: org-toggle-checkbox
+  Toggle checkbox status or---with prefix argument---checkbox presence
+  at point.  With a single prefix argument, add an empty checkbox or
+  remove the current one[fn:: {{{kbd(C-u C-c C-c)}}} on the /first/
+  item of a list with no checkbox adds checkboxes to the rest of the
+  list.].  With a double prefix argument, set it to =[-]=, which is
+  considered to be an intermediate state.
+
+- {{{kbd(C-c C-x C-b)}}} (~org-toggle-checkbox~) ::
+
+  #+kindex: C-c C-x C-b
+  Toggle checkbox status or---with prefix argument---checkbox presence
+  at point.  With double prefix argument, set it to =[-]=, which is
+  considered to be an intermediate state.
+
+  - If there is an active region, toggle the first checkbox in the
+    region and set all remaining boxes to the same status as the
+    first.  With a prefix argument, add or remove the checkbox for all
+    items in the region.
+
+  - If point is in a headline, toggle checkboxes in the region between
+    this headline and the next---so /not/ the entire subtree.
+
+  - If there is no active region, just toggle the checkbox at point.
+
+- {{{kbd(C-c C-x C-r)}}} (~org-toggle-radio-button~) ::
+
+  #+kindex: C-c C-x C-r
+  #+findex: org-toggle-radio-button
+  #+cindex: radio button, checkbox as
+  Toggle checkbox status by using the checkbox of the item at point as
+  a radio button: when the checkbox is turned on, all other checkboxes
+  on the same level will be turned off.  With a universal prefix
+  argument, toggle the presence of the checkbox.  With a double prefix
+  argument, set it to =[-]=.
+
+  #+findex: org-list-checkbox-radio-mode
+  {{{kbd(C-c C-c)}}} can be told to consider checkboxes as radio buttons by
+  setting =#+ATTR_ORG: :radio t= right before the list or by calling
+  {{{kbd(M-x org-list-checkbox-radio-mode)}}} to activate this minor mode.
+
+- {{{kbd(M-S-RET)}}} (~org-insert-todo-heading~) ::
+
+  #+kindex: M-S-RET
+  #+findex: org-insert-todo-heading
+  Insert a new item with a checkbox.  This works only if point is
+  already in a plain list item (see [[*Plain Lists]]).
+
+- {{{kbd(C-c C-x o)}}} (~org-toggle-ordered-property~) ::
+
+  #+kindex: C-c C-x o
+  #+findex: org-toggle-ordered-property
+  #+vindex: org-track-ordered-property-with-tag
+  Toggle the =ORDERED= property of the entry, to toggle if checkboxes
+  must be checked off in sequence.  A property is used for this
+  behavior because this should be local to the current entry, not
+  inherited like a tag.  However, if you would like to /track/ the
+  value of this property with a tag for better visibility, customize
+  ~org-track-ordered-property-with-tag~.
+
+- {{{kbd(C-c #)}}} (~org-update-statistics-cookies~) ::
+
+  #+kindex: C-c #
+  #+findex: org-update-statistics-cookies
+  Update the statistics cookie in the current outline entry.  When
+  called with a {{{kbd(C-u)}}} prefix, update the entire file.
+  Checkbox statistic cookies are updated automatically if you toggle
+  checkboxes with {{{kbd(C-c C-c)}}} and make new ones with
+  {{{kbd(M-S-RET)}}}.  TODO statistics cookies update when changing
+  TODO states.  If you delete boxes/entries or add/change them by
+  hand, use this command to get things back into sync.
+**** Checkboxes statistics
+:PROPERTIES:
+:DESCRIPTION: Count checkboxes in a list.
+:END:
+
+#+cindex: statistics, for checkboxes
+#+cindex: checkbox statistics
+#+cindex: @samp{COOKIE_DATA}, property
+#+vindex: org-hierarchical-checkbox-statistics
+
+You can display number of checked checkboxes and the total number of
+checkboxes present in a list.
+
+To do so you have to insert the statistics cookie in checkbox item
+yourself by typing =[/]= or =[%]= (to display percentage).  Then place
+cursor on cookie and press =C-c C-c (org-toggle-checkbox)= to
+calculate the statistics.  These cookies are updated each time the
+state of a checkbox child changes.
+
+With =[/]= you get =[number of checked checkboxes / total number of checkboxes present in a list]=.
+
+#+begin_example
+- [ ] call people [1/2]
+  - [X] Peter
+  - [ ] Sarah
+#+end_example
+
+With =[%]= you get the percentage of checked checkboxes.
+
+#+begin_example
+- [ ] call people [50%]
+  - [X] Peter
+  - [ ] Sarah
+#+end_example
+
+Cookie can also be placed in the heading and count checkboxes below.
+
+#+begin_example
+,* call people [1/2]
+  - [X] Peter
+  - [ ] Sarah
+#+end_example
+
+***** Hierarchical statistics
+By default checkboxes statistics counts only the state
+of direct children structurally below the checkbox on which
+the cookie appears.
+
+#+begin_example
+- [ ] parent [0/1]
+  - [ ] children
+    - [ ] grandchildren
+#+end_example
+
+To change behaviour to count all checkboxes below the cookie globally use:
+
+#+begin_src emacs-lisp
+(setq org-checkbox-hierarchical-statistics nil)
+#+end_src
+
+#+begin_example
+- [ ] parent [0/2]
+  - [ ] children
+    - [ ] grandchildren
+#+end_example
+
+Or you can change this behavior only for a single tree:
+
+#+begin_example
+,* heading
+  :PROPERTIES:
+  :COOKIE_DATA: recursive
+  :END:
+- [ ] parent [0/2]
+  - [ ] children
+    - [ ] grandchildren
+#+end_example
+
+***** Ambiguity of Statics Cookie - Checkboxes or TODO Items
+#+cindex: @samp{COOKIE_DATA}, property
+If a heading has both checkboxes and TODO children below it, the
+meaning of the statistics cookie become ambiguous.  Set the property
+=COOKIE_DATA= to either =checkbox= or =todo= to resolve this issue.
+
+In example below we have heading with property =COOKIE_DATA= set to =checkbox= and
+under heading: one checkbox item and one subheading.
+Statistic cookie data on heading shows =[0/1]= because there is one unchecked checkbox.
+
+#+begin_example
+,* heading [0/1]
+  :PROPERTIES:
+  :COOKIE_DATA: checkbox
+  :END:
+- [ ] checkbox task
+,** DONE subheading
+#+end_example
+
+Same example but with property =COOKIE_DATA= set to =todo=.
+Statistic cookie data on heading now shows =[1/1]= because there is one subheading with
+DONE state.
+
+#+begin_example
+,* heading [1/1]
+  :PROPERTIES:
+  :COOKIE_DATA: todo
+  :END:
+- [ ] checkbox task
+,** DONE subheading
+#+end_example
 ** Drawers
 :PROPERTIES:
 :DESCRIPTION: Tucking stuff away.
@@ -4608,38 +4866,15 @@ It is often advisable to break down large tasks into smaller,
 manageable subtasks.  You can do this by creating an outline tree
 below a TODO item, with detailed subtasks on the tree[fn:: To keep
 subtasks out of the global TODO list, see the option
-~org-agenda-todo-list-sublevels~.].  To keep an overview of the
-fraction of subtasks that have already been marked as done, insert
-either =[/]= or =[%]= anywhere in the headline.  These cookies are
-updated each time the TODO status of a child changes, or when pressing
-{{{kbd(C-c C-c)}}} on the cookie.  For example:
+~org-agenda-todo-list-sublevels~.].
 
 #+begin_example
-,* Organize Party [33%]
-,** TODO Call people [1/2]
+,* Organize Party
+,** TODO Call people
 ,*** TODO Peter
 ,*** DONE Sarah
 ,** TODO Buy food
 ,** DONE Talk to neighbor
-#+end_example
-
-#+cindex: @samp{COOKIE_DATA}, property
-If a heading has both checkboxes and TODO children below it, the
-meaning of the statistics cookie become ambiguous.  Set the property
-=COOKIE_DATA= to either =checkbox= or =todo= to resolve this issue.
-
-#+vindex: org-hierarchical-todo-statistics
-If you would like to have the statistics cookie count any TODO entries
-in the subtree (not just direct children), configure the variable
-~org-hierarchical-todo-statistics~.  To do this for a single subtree,
-include the word =recursive= into the value of the =COOKIE_DATA=
-property.
-
-#+begin_example
-,* Parent capturing statistics [2/20]
-  :PROPERTIES:
-  :COOKIE_DATA: todo recursive
-  :END:
 #+end_example
 
 If you would like a TODO entry to automatically change to DONE when
@@ -4657,171 +4892,75 @@ all children are done, you can use the following setup:
 Another possibility is the use of checkboxes to identify (a hierarchy
 of) a large number of subtasks (see [[*Checkboxes]]).
 
-** Checkboxes
-:PROPERTIES:
-:DESCRIPTION: Tick-off lists.
-:END:
-#+cindex: checkboxes
+** TODO states statistics
+You can display the number of DONE states and the total number
+of TODO states present in a tree.
 
-#+vindex: org-list-automatic-rules
-Every item in a plain list[fn:17] (see [[*Plain Lists]]) can be made into
-a checkbox by starting it with the string =[ ]=.  This feature is
-similar to TODO items (see [[*TODO Items]]), but is more lightweight.
-Checkboxes are not included into the global TODO list, so they are
-often great to split a task into a number of simple steps.  Or you can
-use them in a shopping list.
+To do so you have to insert the statistics cookie in heading yourself
+by typing =[/]= or =[%]= (to display percentage).  Then place cursor
+on cookie and press =C-c C-c (org-ctrl-c-ctrl-c)= to calculate the
+statistics.  These cookies are updated each time the TODO state of a
+child changes.
 
-Here is an example of a checkbox list.
+Example below show 'Task 1' heading with statistics cookie =[/]= and
+two subheading below.  One subheading have DONE state and second have
+TODO state.  So calculated value is =[1/2]= because we have two
+subheading and one of them have DONE state.
 
 #+begin_example
-,* TODO Organize party [2/4]
-  - [-] call people [1/3]
-    - [ ] Peter
-    - [X] Sarah
-    - [ ] Sam
-  - [X] order food
-  - [ ] think about what music to play
-  - [X] talk to the neighbors
+,* Task 1 [1/2]
+  * DONE Subtask 1
+  * TODO Subtask 2
 #+end_example
 
-A checkbox can be in one of the three states:
-1. not checked =[ ]=
-2. partially checked =[-]=
-3. checked =[X]=
+Same example with percantage by placing =[%]=.
 
-Checkboxes work hierarchically, so if a checkbox item has children
-that are checkboxes, toggling one of the children checkboxes makes the
-parent checkbox reflect if none, some, or all of the children are
-checked.
-
-If all child checkboxes are not checked, the parent checkbox is also not checked.
 #+begin_example
-- [ ] call people
-  - [ ] Peter
-  - [ ] Sarah
+,* Task 1 [50%]
+  * DONE Subtask 1
+  * TODO Subtask 2
 #+end_example
 
-If some but not all child checkboxes are checked, the parent checkbox is partially checked.
+*** Hierarchical statistics
+#+vindex: org-hierarchical-todo-statistics
+By default TODO states statistics counts only the state
+of direct children structurally below the heading on which
+the cookie appears.
+
 #+begin_example
-- [-] call people
-  - [X] Peter
-  - [ ] Sarah
+,* parent [1/1]
+,** DONE children
+,*** DONE grandchildren
 #+end_example
 
-If all child checkboxes are checked, the parent checkbox is also checked.
+To change behaviour to count all TODO states below the cookie globally use:
+
+#+begin_src emacs-lisp
+(setq org-hierarchical-todo-statistics nil)
+#+end_src
+
 #+begin_example
-- [X] call people
-  - [X] Peter
-  - [X] Sarah
+,* parent [2/2]
+,** DONE children
+,*** DONE grandchildren
 #+end_example
 
-#+cindex: statistics, for checkboxes
-#+cindex: checkbox statistics
-#+cindex: @samp{COOKIE_DATA}, property
-#+vindex: org-hierarchical-checkbox-statistics
-The =[2/4]= and =[1/3]= in the first and second line are cookies
-indicating how many checkboxes present in this entry have been checked
-off, and the total number of checkboxes present.  This can give you an
-idea on how many checkboxes remain, even without opening a folded
-entry.  The cookies can be placed into a headline or into (the first
-line of) a plain list item.  Each cookie covers checkboxes of direct
-children structurally below the headline/item on which the cookie
-appears[fn:: Set the variable ~org-hierarchical-checkbox-statistics~
-if you want such cookies to count all checkboxes below the cookie, not
-just those belonging to direct children.].  You have to insert the
-cookie yourself by typing either =[/]= or =[%]=.  With =[/]= you get
-an =n out of m= result, as in the examples above.  With =[%]= you get
-information about the percentage of checkboxes checked (in the above
-example, this would be =[50%]= and =[33%]=, respectively).  In a
-headline, a cookie can count either checkboxes below the heading or
-TODO states of children, and it displays whatever was changed last.
-Set the property =COOKIE_DATA= to either =checkbox= or =todo= to
-resolve this issue.
+Or you can change this behavior only for a single tree:
 
-#+cindex: blocking, of checkboxes
-#+cindex: checkbox blocking
-#+cindex: @samp{ORDERED}, property
-If the current outline node has an =ORDERED= property, checkboxes must
-be checked off in sequence, and an error is thrown if you try to check
-off a box while there are unchecked boxes above it.
+#+begin_example
+,* parent [2/2]
+  :PROPERTIES:
+  :COOKIE_DATA: recursive
+  :END:
+,** DONE children
+,*** DONE grandchildren
+#+end_example
 
-The following commands work with checkboxes:
-
-- {{{kbd(C-c C-c)}}} (~org-toggle-checkbox~) ::
-
-  #+kindex: C-c C-c
-  #+findex: org-toggle-checkbox
-  Toggle checkbox status or---with prefix argument---checkbox presence
-  at point.  With a single prefix argument, add an empty checkbox or
-  remove the current one[fn:: {{{kbd(C-u C-c C-c)}}} on the /first/
-  item of a list with no checkbox adds checkboxes to the rest of the
-  list.].  With a double prefix argument, set it to =[-]=, which is
-  considered to be an intermediate state.
-
-- {{{kbd(C-c C-x C-b)}}} (~org-toggle-checkbox~) ::
-
-  #+kindex: C-c C-x C-b
-  Toggle checkbox status or---with prefix argument---checkbox presence
-  at point.  With double prefix argument, set it to =[-]=, which is
-  considered to be an intermediate state.
-
-  - If there is an active region, toggle the first checkbox in the
-    region and set all remaining boxes to the same status as the
-    first.  With a prefix argument, add or remove the checkbox for all
-    items in the region.
-
-  - If point is in a headline, toggle checkboxes in the region between
-    this headline and the next---so /not/ the entire subtree.
-
-  - If there is no active region, just toggle the checkbox at point.
-
-- {{{kbd(C-c C-x C-r)}}} (~org-toggle-radio-button~) ::
-
-  #+kindex: C-c C-x C-r
-  #+findex: org-toggle-radio-button
-  #+cindex: radio button, checkbox as
-  Toggle checkbox status by using the checkbox of the item at point as
-  a radio button: when the checkbox is turned on, all other checkboxes
-  on the same level will be turned off.  With a universal prefix
-  argument, toggle the presence of the checkbox.  With a double prefix
-  argument, set it to =[-]=.
-
-  #+findex: org-list-checkbox-radio-mode
-  {{{kbd(C-c C-c)}}} can be told to consider checkboxes as radio buttons by
-  setting =#+ATTR_ORG: :radio t= right before the list or by calling
-  {{{kbd(M-x org-list-checkbox-radio-mode)}}} to activate this minor mode.
-
-- {{{kbd(M-S-RET)}}} (~org-insert-todo-heading~) ::
-
-  #+kindex: M-S-RET
-  #+findex: org-insert-todo-heading
-  Insert a new item with a checkbox.  This works only if point is
-  already in a plain list item (see [[*Plain Lists]]).
-
-- {{{kbd(C-c C-x o)}}} (~org-toggle-ordered-property~) ::
-
-  #+kindex: C-c C-x o
-  #+findex: org-toggle-ordered-property
-  #+vindex: org-track-ordered-property-with-tag
-  Toggle the =ORDERED= property of the entry, to toggle if checkboxes
-  must be checked off in sequence.  A property is used for this
-  behavior because this should be local to the current entry, not
-  inherited like a tag.  However, if you would like to /track/ the
-  value of this property with a tag for better visibility, customize
-  ~org-track-ordered-property-with-tag~.
-
-- {{{kbd(C-c #)}}} (~org-update-statistics-cookies~) ::
-
-  #+kindex: C-c #
-  #+findex: org-update-statistics-cookies
-  Update the statistics cookie in the current outline entry.  When
-  called with a {{{kbd(C-u)}}} prefix, update the entire file.
-  Checkbox statistic cookies are updated automatically if you toggle
-  checkboxes with {{{kbd(C-c C-c)}}} and make new ones with
-  {{{kbd(M-S-RET)}}}.  TODO statistics cookies update when changing
-  TODO states.  If you delete boxes/entries or add/change them by
-  hand, use this command to get things back into sync.
-
+*** Ambiguity of Statics Cookie - TODO Items or Checkboxes
+If a heading has both checkboxes and TODO children below it, the
+meaning of the statistics cookie become ambiguous.  Set the property
+=COOKIE_DATA= to either =checkbox= or =todo= to resolve this issue
+(see examples in [[Ambiguity of Statics Cookie - Checkboxes or TODO Items]]).
 * Tags
 :PROPERTIES:
 :DESCRIPTION: Tagging headlines and matching sets of tags.
