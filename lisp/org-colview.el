@@ -59,6 +59,11 @@
 
 ;;; Configuration
 
+(defcustom org-columns-checkbox-states '("[ ]" "[X]")
+  "Checkbox states to cycle between."
+  :group 'checkbox
+  :type '(repeat string))
+
 (defcustom org-columns-modify-value-for-display-function nil
   "Function that modifies values for display in column view.
 For example, it can be used to cut out a certain part from a time stamp.
@@ -737,7 +742,7 @@ an integer, select that value."
 	  (let ((all
 		 (or (org-property-get-allowed-values pom key)
 		     (pcase (nth column org-columns-current-fmt-compiled)
-		       (`(,_ ,_ ,_ ,(or "X" "X/" "X%") ,_) '("[ ]" "[X]")))
+		       (`(,_ ,_ ,_ ,(or "X" "X/" "X%") ,_) org-columns-checkbox-states))
 		     (org-colview-construct-allowed-dates value))))
 	    (if previous (reverse all) all))))
     (when (equal key "ITEM") (error "Cannot edit item headline from here"))
