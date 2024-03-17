@@ -593,13 +593,22 @@ for the duration of the command.")
   (or (org-columns--toggle)
       (org-columns-quit)))
 
+(defun org-columns--nth-opposite-state (state)
+  "Get nth position of STATE from `org-columns-checkbox-states'"
+  (pcase state
+    ("[ ]" (cl-position "[ ]" org-columns-checkbox-states :test 'equal))
+    ("[X]" (cl-position "[X]" org-columns-checkbox-states :test 'equal))
+    ("[x]" (cl-position "[X]" org-columns-checkbox-states :test 'equal))))
+
 (defun org-columns--toggle ()
   "Toggle checkbox at point.  Return non-nil if toggle happened, else nil.
 See info documentation about realizing a suitable checkbox."
-  (when (string-match "\\`\\[[ xX-]\\]\\'"
-		      (get-char-property (point) 'org-columns-value))
-    (org-columns-next-allowed-value)
-    t))
+  (let ((value (get-char-property (point) 'org-columns-value)))
+    (pcase value
+      ("[ ]" (org-columns-next-allowed-value nil (nth-oposite-state "[ ]")))
+      ("[X]" (org-columns-next-allowed-value nil (nth-oposite-state "[X]")))
+      ("[x]" (org-columns-next-allowed-value nil (nth-oposite-state "[X]")))
+      ("[-]" (org-columns-next-allowed-value)))))
 
 (defvar org-overriding-columns-format nil
   "When set, overrides any other format definition for the agenda.
