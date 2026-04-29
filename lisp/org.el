@@ -18115,7 +18115,329 @@ Otherwise, return a user error."
 	   (`link (call-interactively #'ffap))
 	   (_ (user-error "No special environment to edit here"))))))))
 
-(defun org-ctrl-c-ctrl-c (&optional arg)
+;;; org-ctrl-c-ctrl-c dispatch via meta-functions
+;;
+;; Requires the `meta-functions' library
+;; (https://github.com/yantar92/meta-functions), which itself depends
+;; on `dash'.  In the org.el package tree `meta-functions' would live
+;; in lisp/meta-functions.el; here we just soft-require it so the file
+;; still loads without the library present.
+(require 'meta-functions nil t)
+
+;; ---------------------------------------------------------------------------
+;; Context helper
+;; ---------------------------------------------------------------------------
+
+(defun org--ccc-context ()
+  "Return (CONTEXT . TYPE) at point for `org-ctrl-c-ctrl-c' dispatch.
+Adjusts a paragraph that begins on the same line as its parent item
+so that TYPE is \\='item instead of \\='paragraph."
+  (let* ((context
+	  (org-element-lineage
+	   (org-element-context)
+	   '(babel-call clock dynamic-block footnote-definition
+	     footnote-reference inline-babel-call inline-src-block
+	     inlinetask item keyword node-property paragraph
+	     plain-list planning property-drawer radio-target
+	     src-block statistics-cookie table table-cell table-row
+	     timestamp)
+	   t))
+	 (type (org-element-type context)))
+    (when (eq type 'paragraph)
+      (let ((parent (org-element-parent context)))
+	(when (and (org-element-type-p parent 'item)
+		   (= (line-beginning-position) (org-element-begin parent)))
+	  (setq context parent)
+	  (setq type 'item))))
+    (cons context type)))
+
+;; ---------------------------------------------------------------------------
+;; Predicates  (org--ccc-p-*)
+;; ---------------------------------------------------------------------------
+
+(defun org--ccc-p-columns ()
+  (bound-and-true-p org-columns-overlays))
+
+(defun org--ccc-p-overlays ()
+  (or (bound-and-true-p org-clock-overlays) org-occur-highlights))
+
+(defun org--ccc-p-finish-function ()
+  (and (local-variable-p 'org-finish-function) (fboundp org-finish-function)))
+
+(defun org--ccc-p-src-block ()
+  (memq (cdr (org--ccc-context)) '(src-block inline-src-block)))
+
+(defun org--ccc-p-blank-line ()
+  (org-match-line "[ \t]*$"))
+
+(defun org--ccc-p-babel-call ()
+  (memq (cdr (org--ccc-context)) '(babel-call inline-babel-call)))
+
+(defun org--ccc-p-clock ()
+  (eq (cdr (org--ccc-context)) 'clock))
+
+(defun org--ccc-p-dynamic-block ()
+  (eq (cdr (org--ccc-context)) 'dynamic-block))
+
+(defun org--ccc-p-footnote-definition ()
+  (eq (cdr (org--ccc-context)) 'footnote-definition))
+
+(defun org--ccc-p-footnote-reference ()
+  (eq (cdr (org--ccc-context)) 'footnote-reference))
+
+(defun org--ccc-p-headline ()
+  (memq (cdr (org--ccc-context)) '(headline inlinetask)))
+
+(defun org--ccc-p-item ()
+  (eq (cdr (org--ccc-context)) 'item))
+
+(defun org--ccc-p-plain-list ()
+  (eq (cdr (org--ccc-context)) 'plain-list))
+
+(defun org--ccc-p-keyword ()
+  (eq (cdr (org--ccc-context)) 'keyword))
+
+(defun org--ccc-p-property ()
+  (memq (cdr (org--ccc-context)) '(property-drawer node-property)))
+
+(defun org--ccc-p-radio-target ()
+  (eq (cdr (org--ccc-context)) 'radio-target))
+
+(defun org--ccc-p-statistics-cookie ()
+  (eq (cdr (org--ccc-context)) 'statistics-cookie))
+
+(defun org--ccc-p-table ()
+  (memq (cdr (org--ccc-context)) '(table table-cell table-row)))
+
+(defun org--ccc-p-timestamp ()
+  (let ((type (cdr (org--ccc-context))))
+    (or (eq type 'timestamp)
+	(and (eq type 'planning) (org-at-timestamp-p 'lax)))))
+
+(defun org--ccc-p-bare-heading ()
+  ;; Point is on an element type that org-element-lineage does not
+  ;; recognise, but we are physically on a heading line.
+  (and (null (cdr (org--ccc-context))) (org-at-heading-p)))
+
+;; ---------------------------------------------------------------------------
+;; Handlers  (org--ccc-do-*)  — each is a self-contained interactive command
+;; ---------------------------------------------------------------------------
+
+(defun org--ccc-do-clear-overlays ()
+  (interactive)
+  (when (boundp 'org-clock-overlays) (org-clock-remove-overlays))
+  (org-remove-occur-highlights)
+  (message "Temporary highlights/overlays removed from current buffer"))
+
+(defun org--ccc-do-finish-function ()
+  (interactive)
+  (funcall org-finish-function))
+
+(defun org--ccc-do-src-block (&optional arg)
+  (interactive "P")
+  (let ((context (car (org--ccc-context))))
+    (unless org-babel-no-eval-on-ctrl-c-ctrl-c
+      (org-babel-eval-wipe-error-buffer)
+      (org-babel-execute-src-block
+       arg (org-babel-get-src-block-info nil context)))))
+
+(defun org--ccc-do-blank-line ()
+  (interactive)
+  (or (run-hook-with-args-until-success 'org-ctrl-c-ctrl-c-final-hook)
+      (user-error
+       (substitute-command-keys
+	"`\\[org-ctrl-c-ctrl-c]' can do nothing useful here"))))
+
+(defun org--ccc-do-babel-call ()
+  (interactive)
+  (let* ((pair (org--ccc-context))
+	 (context (car pair))
+	 (type (cdr pair))
+	 (info (org-babel-lob-get-info context)))
+    (when info (org-babel-execute-src-block nil info nil type))))
+
+(defun org--ccc-do-clock ()
+  (interactive)
+  (if (org-at-timestamp-p 'lax)
+      ;; Update the timestamp as well.  `org-timestamp-change'
+      ;; will call `org-clock-update-time-maybe'.
+      (org-timestamp-change 0 'day)
+    (org-clock-update-time-maybe)))
+
+(defun org--ccc-do-dynamic-block ()
+  (interactive)
+  (let ((context (car (org--ccc-context))))
+    (save-excursion
+      (goto-char (org-element-post-affiliated context))
+      (org-update-dblock))))
+
+(defun org--ccc-do-footnote-definition ()
+  (interactive)
+  (let ((context (car (org--ccc-context))))
+    (goto-char (org-element-post-affiliated context))
+    (call-interactively #'org-footnote-action)))
+
+(defun org--ccc-do-headline ()
+  (interactive)
+  (let ((context (car (org--ccc-context))))
+    (save-excursion
+      (goto-char (org-element-begin context))
+      (call-interactively #'org-set-tags-command))))
+
+(defun org--ccc-do-item (&optional arg)
+  ;; At an item: `C-u C-u' sets checkbox to "[-]" unconditionally,
+  ;; whereas `C-u' will toggle its presence.  Without a universal
+  ;; argument, if the item has a checkbox, toggle it.  Otherwise
+  ;; repair the list.
+  (interactive "P")
+  (let* ((context (car (org--ccc-context)))
+	 (radio-list-p (org-at-radio-list-p)))
+    (if (or radio-list-p
+	    (and (boundp org-list-checkbox-radio-mode)
+		 org-list-checkbox-radio-mode))
+	(org-toggle-radio-button arg)
+      (let* ((box (org-element-property :checkbox context))
+	     (struct (org-element-property :structure context))
+	     ;; Avoid modifying cached structure by side effect.
+	     (struct (copy-tree struct))
+	     (old-struct (copy-tree struct))
+	     (parents (org-list-parents-alist struct))
+	     (prevs (org-list-prevs-alist struct))
+	     (orderedp (org-not-nil (org-entry-get nil "ORDERED"))))
+	(org-list-set-checkbox
+	 (org-element-begin context) struct
+	 (cond ((equal arg '(16)) "[-]")
+	       ((and (not box) (equal arg '(4))) "[ ]")
+	       ((or (not box) (equal arg '(4))) nil)
+	       ((eq box 'on) "[ ]")
+	       (t "[X]")))
+	;; Mimic `org-list-write-struct' but with grabbing a return
+	;; value from `org-list-struct-fix-box'.
+	(org-list-struct-fix-ind struct parents 2)
+	(org-list-struct-fix-item-end struct)
+	(org-list-struct-fix-bul struct prevs)
+	(org-list-struct-fix-ind struct parents)
+	(let ((block-item
+	       (org-list-struct-fix-box struct parents prevs orderedp)))
+	  (if (and box (equal struct old-struct))
+	      (if (equal arg '(16))
+		  (message "Checkboxes already reset")
+		(user-error "Cannot toggle this checkbox: %s"
+			    (if (eq box 'on)
+				"all subitems checked"
+			      "unchecked subitems")))
+	    (org-list-struct-apply-struct struct old-struct)
+	    (org-update-checkbox-count-maybe))
+	  (when block-item
+	    (message "Checkboxes were removed due to empty box at line %d"
+		     (org-current-line block-item))))))))
+
+(defun org--ccc-do-plain-list (&optional arg)
+  ;; At a plain list, with a double C-u argument, set checkboxes of
+  ;; each item to "[-]", whereas a single one will toggle their
+  ;; presence according to the state of the first item in the list.
+  ;; Without an argument, repair the list.
+  (interactive "P")
+  (let* ((context (car (org--ccc-context)))
+	 (radio-list-p (org-at-radio-list-p)))
+    (if (or radio-list-p
+	    (and (boundp org-list-checkbox-radio-mode)
+		 org-list-checkbox-radio-mode))
+	(org-toggle-radio-button arg)
+      (let* ((begin (org-element-contents-begin context))
+	     (struct (org-element-property :structure context))
+	     ;; Avoid modifying cached structure by side effect.
+	     (struct (copy-tree struct))
+	     (old-struct (copy-tree struct))
+	     (first-box (save-excursion
+			  (goto-char begin)
+			  (looking-at org-list-full-item-re)
+			  (match-string-no-properties 3)))
+	     (new-box (cond ((equal arg '(16)) "[-]")
+			    ((equal arg '(4)) (unless first-box "[ ]"))
+			    ((equal first-box "[X]") "[ ]")
+			    (t "[X]"))))
+	(cond
+	 (arg
+	  (dolist (pos (org-list-get-all-items
+		       begin struct (org-list-prevs-alist struct)))
+	    (org-list-set-checkbox pos struct new-box)))
+	 ((and first-box (eq (point) begin))
+	  ;; For convenience, when point is at bol on the first item
+	  ;; of the list and no argument is provided, simply toggle
+	  ;; checkbox of that item, if any.
+	  (org-list-set-checkbox begin struct new-box)))
+	(when (equal (org-list-write-struct
+		      struct (org-list-parents-alist struct) old-struct)
+		     old-struct)
+	  (message "Cannot update this checkbox"))
+	(org-update-checkbox-count-maybe)))))
+
+(defun org--ccc-do-keyword ()
+  (interactive)
+  (let ((org-inhibit-startup-visibility-stuff t)
+	(org-startup-align-all-tables nil))
+    (when (boundp 'org-table-coordinate-overlays)
+      (mapc #'delete-overlay org-table-coordinate-overlays)
+      (setq org-table-coordinate-overlays nil))
+    (org-save-outline-visibility 'use-markers (org-mode-restart)))
+  (message "Local setup has been refreshed"))
+
+(defun org--ccc-do-table (&optional arg)
+  ;; At a table, generate a plot if on the #+plot line, recalculate
+  ;; every field and align it otherwise.  Also send the table if
+  ;; necessary.
+  (interactive "P")
+  (let* ((pair (org--ccc-context))
+	 (context (car pair))
+	 (type (cdr pair)))
+    (cond
+     ((and (org-match-line "[ \t]*#\\+plot:")
+	   (< (point) (org-element-post-affiliated context)))
+      (org-plot/gnuplot))
+     ;; If the table has a `table.el' type, just give up.
+     ((eq (org-element-property :type context) 'table.el)
+      (message "%s" (substitute-command-keys "\\<org-mode-map>\
+Use `\\[org-edit-special]' to edit table.el tables")))
+     ;; At a table row or cell, maybe recalculate line but always
+     ;; align table.
+     ((or (eq type 'table)
+	  ;; Check if point is at a TBLFM line.
+	  (and (eq type 'table-row)
+	       (= (point) (org-element-end context))))
+      (save-excursion
+	(if (org-at-TBLFM-p)
+	    (org-table-calc-current-TBLFM)
+	  (goto-char (org-element-contents-begin context))
+	  (org-call-with-arg 'org-table-recalculate (or arg t))
+	  (orgtbl-send-table 'maybe))))
+     (t
+      (org-table-maybe-eval-formula)
+      (cond (arg (call-interactively #'org-table-recalculate))
+	    ((org-table-maybe-recalculate-line))
+	    (t (org-table-align)))))))
+
+(defun org--ccc-do-timestamp ()
+  (interactive)
+  (org-timestamp-change 0 'day))
+
+;; ---------------------------------------------------------------------------
+;; Main dispatch via meta-defun
+;;
+;; Each :cond pair is (predicate . handler).  `meta-defun' checks
+;; predicates in order and calls the first matching handler via
+;; `call-interactively', so ordering mirrors the original pcase.
+;;
+;; For combined predicate+action cases (babel-hash-at-point, hooks)
+;; the predicate itself performs the work; the body is (ignore) — a
+;; legal no-op interactive form.
+;;
+;; External packages can add new cases without touching this file:
+;;   (meta-defun org-ctrl-c-ctrl-c
+;;     :cond my-predicate my-handler)
+;; ---------------------------------------------------------------------------
+
+(meta-defun org-ctrl-c-ctrl-c (&optional arg)
   "Set tags in headline, or update according to changed information at point.
 
 This command does many different things, depending on context:
@@ -18164,216 +18486,44 @@ This command does many different things, depending on context:
   before code block evaluation, by default every code block
   evaluation requires confirmation.  Code block evaluation can be
   inhibited by setting `org-babel-no-eval-on-ctrl-c-ctrl-c'."
-  (interactive "P" org-mode)
-  (cond
-   ((bound-and-true-p org-columns-overlays) (org-columns-quit))
-   ((or (bound-and-true-p org-clock-overlays) org-occur-highlights)
-    (when (boundp 'org-clock-overlays) (org-clock-remove-overlays))
-    (org-remove-occur-highlights)
-    (message "Temporary highlights/overlays removed from current buffer"))
-   ((and (local-variable-p 'org-finish-function)
-	 (fboundp org-finish-function))
-    (funcall org-finish-function))
-   ((org-babel-hash-at-point))
-   ((run-hook-with-args-until-success 'org-ctrl-c-ctrl-c-hook))
-   (t
-    (let* ((context
-	    (org-element-lineage
-	     (org-element-context)
-	     ;; Limit to supported contexts.
-	     '(babel-call clock dynamic-block footnote-definition
-			  footnote-reference inline-babel-call inline-src-block
-			  inlinetask item keyword node-property paragraph
-			  plain-list planning property-drawer radio-target
-			  src-block statistics-cookie table table-cell table-row
-			  timestamp)
-	     t))
-	   (radio-list-p (org-at-radio-list-p))
-	   (type (org-element-type context)))
-      ;; For convenience: at the first line of a paragraph on the same
-      ;; line as an item, apply function on that item instead.
-      (when (eq type 'paragraph)
-	(let ((parent (org-element-parent context)))
-	  (when (and (org-element-type-p parent 'item)
-		     (= (line-beginning-position)
-			(org-element-begin parent)))
-	    (setq context parent)
-	    (setq type 'item))))
-      ;; Act according to type of element or object at point.
-      ;;
-      ;; Do nothing on a blank line, except if it is contained in
-      ;; a source block.  Hence, we first check if point is in such
-      ;; a block and then if it is at a blank line.
-      (pcase type
-	((or `inline-src-block `src-block)
-	 (unless org-babel-no-eval-on-ctrl-c-ctrl-c
-	   (org-babel-eval-wipe-error-buffer)
-	   (org-babel-execute-src-block
-	    current-prefix-arg (org-babel-get-src-block-info nil context))))
-	((guard (org-match-line "[ \t]*$"))
-	 (or (run-hook-with-args-until-success 'org-ctrl-c-ctrl-c-final-hook)
-	     (user-error
-	      (substitute-command-keys
-	       "`\\[org-ctrl-c-ctrl-c]' can do nothing useful here"))))
-	((or `babel-call `inline-babel-call)
-	 (let ((info (org-babel-lob-get-info context)))
-	   (when info (org-babel-execute-src-block nil info nil type))))
-	(`clock
-         (if (org-at-timestamp-p 'lax)
-             ;; Update the timestamp as well.  `org-timestamp-change'
-             ;; will call `org-clock-update-time-maybe'.
-             (org-timestamp-change 0 'day)
-           (org-clock-update-time-maybe)))
-	(`dynamic-block
-	 (save-excursion
-	   (goto-char (org-element-post-affiliated context))
-	   (org-update-dblock)))
-	(`footnote-definition
-	 (goto-char (org-element-post-affiliated context))
-	 (call-interactively 'org-footnote-action))
-	(`footnote-reference (call-interactively #'org-footnote-action))
-	((or `headline `inlinetask)
-	 (save-excursion (goto-char (org-element-begin context))
-			 (call-interactively #'org-set-tags-command)))
-	(`item
-	 ;; At an item: `C-u C-u' sets checkbox to "[-]"
-	 ;; unconditionally, whereas `C-u' will toggle its presence.
-	 ;; Without a universal argument, if the item has a checkbox,
-	 ;; toggle it.  Otherwise repair the list.
-	 (if (or radio-list-p
-		 (and (boundp org-list-checkbox-radio-mode)
-		      org-list-checkbox-radio-mode))
-	     (org-toggle-radio-button arg)
-	   (let* ((box (org-element-property :checkbox context))
-		  (struct (org-element-property :structure context))
-                  ;; Avoid modifying cached structure by side effect.
-                  (struct (copy-tree struct))
-		  (old-struct (copy-tree struct))
-		  (parents (org-list-parents-alist struct))
-		  (prevs (org-list-prevs-alist struct))
-		  (orderedp (org-not-nil (org-entry-get nil "ORDERED"))))
-	     (org-list-set-checkbox
-	      (org-element-begin context) struct
-	      (cond ((equal arg '(16)) "[-]")
-		    ((and (not box) (equal arg '(4))) "[ ]")
-		    ((or (not box) (equal arg '(4))) nil)
-		    ((eq box 'on) "[ ]")
-		    (t "[X]")))
-	     ;; Mimic `org-list-write-struct' but with grabbing a return
-	     ;; value from `org-list-struct-fix-box'.
-	     (org-list-struct-fix-ind struct parents 2)
-	     (org-list-struct-fix-item-end struct)
-	     (org-list-struct-fix-bul struct prevs)
-	     (org-list-struct-fix-ind struct parents)
-	     (let ((block-item
-		    (org-list-struct-fix-box struct parents prevs orderedp)))
-	       (if (and box (equal struct old-struct))
-		   (if (equal arg '(16))
-		       (message "Checkboxes already reset")
-		     (user-error "Cannot toggle this checkbox: %s"
-				 (if (eq box 'on)
-				     "all subitems checked"
-				   "unchecked subitems")))
-		 (org-list-struct-apply-struct struct old-struct)
-		 (org-update-checkbox-count-maybe))
-	       (when block-item
-		 (message "Checkboxes were removed due to empty box at line %d"
-			  (org-current-line block-item)))))))
-	(`plain-list
-	 ;; At a plain list, with a double C-u argument, set
-	 ;; checkboxes of each item to "[-]", whereas a single one
-	 ;; will toggle their presence according to the state of the
-	 ;; first item in the list.  Without an argument, repair the
-	 ;; list.
-	 (if (or radio-list-p
-		 (and (boundp org-list-checkbox-radio-mode)
-		      org-list-checkbox-radio-mode))
-	     (org-toggle-radio-button arg)
-	   (let* ((begin (org-element-contents-begin context))
-		  (struct (org-element-property :structure context))
-                  ;; Avoid modifying cached structure by side effect.
-                  (struct (copy-tree struct))
-		  (old-struct (copy-tree struct))
-		  (first-box (save-excursion
-			       (goto-char begin)
-			       (looking-at org-list-full-item-re)
-			       (match-string-no-properties 3)))
-		  (new-box (cond ((equal arg '(16)) "[-]")
-				 ((equal arg '(4)) (unless first-box "[ ]"))
-				 ((equal first-box "[X]") "[ ]")
-				 (t "[X]"))))
-	     (cond
-	      (arg
-	       (dolist (pos
-			(org-list-get-all-items
-			 begin struct (org-list-prevs-alist struct)))
-		 (org-list-set-checkbox pos struct new-box)))
-	      ((and first-box (eq (point) begin))
-	       ;; For convenience, when point is at bol on the first
-	       ;; item of the list and no argument is provided, simply
-	       ;; toggle checkbox of that item, if any.
-	       (org-list-set-checkbox begin struct new-box)))
-	     (when (equal
-		    (org-list-write-struct
-		     struct (org-list-parents-alist struct) old-struct)
-		    old-struct)
-	       (message "Cannot update this checkbox"))
-	     (org-update-checkbox-count-maybe))))
-	(`keyword
-	 (let ((org-inhibit-startup-visibility-stuff t)
-	       (org-startup-align-all-tables nil))
-	   (when (boundp 'org-table-coordinate-overlays)
-	     (mapc #'delete-overlay org-table-coordinate-overlays)
-	     (setq org-table-coordinate-overlays nil))
-	   (org-save-outline-visibility 'use-markers (org-mode-restart)))
-	 (message "Local setup has been refreshed"))
-	((or `property-drawer `node-property)
-	 (call-interactively #'org-property-action))
-	(`radio-target
-	 (call-interactively #'org-update-radio-target-regexp))
-	(`statistics-cookie
-	 (call-interactively #'org-update-statistics-cookies))
-	((or `table `table-cell `table-row)
-	 ;; At a table, generate a plot if on the #+plot line,
-         ;; recalculate every field and align it otherwise.  Also
-	 ;; send the table if necessary.
-         (cond
-          ((and (org-match-line "[ \t]*#\\+plot:")
-                (< (point) (org-element-post-affiliated context)))
-           (org-plot/gnuplot))
-          ;; If the table has a `table.el' type, just give up.
-          ((eq (org-element-property :type context) 'table.el)
-           (message "%s" (substitute-command-keys "\\<org-mode-map>\
-Use `\\[org-edit-special]' to edit table.el tables")))
-          ;; At a table row or cell, maybe recalculate line but always
-	  ;; align table.
-          ((or (eq type 'table)
-               ;; Check if point is at a TBLFM line.
-               (and (eq type 'table-row)
-                    (= (point) (org-element-end context))))
-           (save-excursion
-             (if (org-at-TBLFM-p)
-                 (org-table-calc-current-TBLFM)
-               (goto-char (org-element-contents-begin context))
-               (org-call-with-arg 'org-table-recalculate (or arg t))
-               (orgtbl-send-table 'maybe))))
-          (t
-           (org-table-maybe-eval-formula)
-           (cond (arg (call-interactively #'org-table-recalculate))
-                 ((org-table-maybe-recalculate-line))
-                 (t (org-table-align))))))
-	((or `timestamp (and `planning (guard (org-at-timestamp-p 'lax))))
-	 (org-timestamp-change 0 'day))
-	((and `nil (guard (org-at-heading-p)))
-	 ;; When point is on an unsupported object type, we can miss
-	 ;; the fact that it also is at a heading.  Handle it here.
-	 (call-interactively #'org-set-tags-command))
-	((guard
-	  (run-hook-with-args-until-success 'org-ctrl-c-ctrl-c-final-hook)))
-	(_
-	 (user-error
-	  (substitute-command-keys
-	   "`\\[org-ctrl-c-ctrl-c]' can do nothing useful here"))))))))
+  ;; Pre-element-context checks (fast path — no org-element call needed).
+  :cond org--ccc-p-columns           (org-columns-quit)
+  :cond org--ccc-p-overlays          org--ccc-do-clear-overlays
+  :cond org--ccc-p-finish-function   org--ccc-do-finish-function
+  ;; org-babel-hash-at-point acts as its own predicate+handler.
+  :cond org-babel-hash-at-point      (ignore)
+  ;; Hook; already executed as a side-effect of the predicate call.
+  :cond (lambda ()
+	  (run-hook-with-args-until-success 'org-ctrl-c-ctrl-c-hook))
+	(ignore)
+  ;; Element-context dispatch.  src-block is checked before blank-line
+  ;; so that blank lines inside a source block are evaluated, not ignored.
+  :cond org--ccc-p-src-block         org--ccc-do-src-block
+  :cond org--ccc-p-blank-line        org--ccc-do-blank-line
+  :cond org--ccc-p-babel-call        org--ccc-do-babel-call
+  :cond org--ccc-p-clock             org--ccc-do-clock
+  :cond org--ccc-p-dynamic-block     org--ccc-do-dynamic-block
+  :cond org--ccc-p-footnote-definition org--ccc-do-footnote-definition
+  :cond org--ccc-p-footnote-reference org-footnote-action
+  :cond org--ccc-p-headline          org--ccc-do-headline
+  :cond org--ccc-p-item              org--ccc-do-item
+  :cond org--ccc-p-plain-list        org--ccc-do-plain-list
+  :cond org--ccc-p-keyword           org--ccc-do-keyword
+  :cond org--ccc-p-property          org-property-action
+  :cond org--ccc-p-radio-target      org-update-radio-target-regexp
+  :cond org--ccc-p-statistics-cookie org-update-statistics-cookies
+  :cond org--ccc-p-table             org--ccc-do-table
+  :cond org--ccc-p-timestamp         org--ccc-do-timestamp
+  ;; Fallback: unsupported element type but physically on a heading.
+  :cond org--ccc-p-bare-heading      org-set-tags-command
+  ;; Final hook; already executed as a side-effect of the predicate call.
+  :cond (lambda ()
+	  (run-hook-with-args-until-success 'org-ctrl-c-ctrl-c-final-hook))
+	(ignore)
+  ;; Default: nothing useful here.
+  (user-error
+   (substitute-command-keys
+    "`\\[org-ctrl-c-ctrl-c]' can do nothing useful here")))
 
 (defun org-mode-restart ()
   "Restart `org-mode'."
